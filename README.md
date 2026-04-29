@@ -7,11 +7,13 @@
 
 This repository bridges the gap between the mathematical formulation of HHL and an executable Qiskit circuit, with explicit statevector inspection, eigenvalue inversion, and postselected solution recovery.
 
-It presents a compact, portfolio-ready implementation of the Harrow-Hassidim-Lloyd algorithm for a fixed `2x2` Hermitian linear system. The project is structured as a reusable Python package with reproducible figures, tests, theory notes, and a pedagogical notebook.
+It is designed as a compact scientific-computing artifact rather than a notebook dump: the code is packaged, the theory is documented, the figures are reproducible, the statevector is inspectable, and the numerical agreement with the classical solution is measured directly.
 
 ![HHL circuit overview](docs/figures/circuit_hhl.svg)
 
-## Visual Storytelling
+## Why This Repository Exists
+
+Most HHL examples stop at a high-level circuit sketch or a symbolic derivation. This project focuses on the missing middle:
 
 1. Classical linear system
 2. Quantum state encoding
@@ -21,30 +23,68 @@ It presents a compact, portfolio-ready implementation of the Harrow-Hassidim-Llo
 6. Postselection
 7. Solution comparison
 
+The result is a small but rigorous implementation that makes each stage of the algorithm visible in code, figures, and tests.
+
 ## Problem Instance
 
-The repository studies the system
+The repository studies the fixed Hermitian system
 
 \[
-A x = b, \quad
+A x = b, \qquad
 A =
 \begin{bmatrix}
 1 & -1/3 \\
 -1/3 & 1
 \end{bmatrix},
-\quad
+\qquad
 b =
 \begin{bmatrix}
 1 \\
 0
 \end{bmatrix},
-\quad
+\qquad
 t = \frac{3\pi}{4}.
 \]
 
-For this choice of `t`, the eigenphases of `exp(i A t)` align cleanly with a two-qubit phase register, making the mechanism of HHL especially transparent.
+This choice of evolution time is deliberate: the eigenphases of \(e^{iAt}\) are exactly representable on a two-qubit phase register, which makes the mechanics of HHL especially transparent.
 
-## Repository Overview
+## Installation
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+For package-oriented local development, you can also run:
+
+```bash
+pip install -e .
+```
+
+## Quick Start
+
+```bash
+python3 scripts/run_hhl_demo.py
+```
+
+Useful options:
+
+```bash
+python3 scripts/run_hhl_demo.py --hide-statevector
+python3 scripts/run_hhl_demo.py --precision-max-bits 8
+python3 scripts/run_hhl_demo.py --save-json results/hhl_summary.json
+```
+
+This script:
+- builds the full HHL circuit
+- simulates the final statevector
+- extracts the postselected solution amplitudes
+- prints fidelity and relative error against the normalized classical solution
+- performs a precision sweep over discretized eigenphases
+- regenerates all figures under `docs/figures/`
+
+## Repository Structure
 
 ```text
 .
@@ -55,6 +95,13 @@ For this choice of `t`, the eigenphases of `exp(i A t)` align cleanly with a two
 ├── AGENTS.md
 ├── .github/workflows/ci.yml
 ├── src/hhl_lab/
+│   ├── analysis.py
+│   ├── hhl.py
+│   ├── inversion.py
+│   ├── matrices.py
+│   ├── qpe.py
+│   ├── simulation.py
+│   └── visualization.py
 ├── notebooks/01_hhl_algorithm_walkthrough.ipynb
 ├── scripts/
 ├── docs/
@@ -62,79 +109,66 @@ For this choice of `t`, the eigenphases of `exp(i A t)` align cleanly with a two
 └── examples/minimal_hhl.py
 ```
 
-## Installation
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-For package-style development, you can also install the project itself:
-
-```bash
-pip install -e .
-```
-
-## Quick Start
-
-```bash
-python scripts/run_hhl_demo.py
-```
-
-This command:
-- builds the full HHL circuit
-- simulates the final statevector
-- extracts the postselected solution amplitudes
-- compares the normalized HHL state with the classical normalized solution
-- saves publication-style figures under `docs/figures/`
-
 ## Visual Overview
 
-The project follows a deliberate seven-step narrative:
-
-1. Start from a classical Hermitian linear system.
-2. Encode the right-hand side vector as a quantum state.
-3. Use quantum phase estimation to encode the eigenvalues of `A`.
-4. Apply a controlled ancilla rotation implementing reciprocal weighting.
-5. Uncompute the phase register.
-6. Postselect on the ancilla qubit.
-7. Compare the recovered amplitudes with the normalized classical solution.
-
 ![Solution comparison](docs/figures/solution_comparison.svg)
-![Eigenvalue encoding](docs/figures/eigenvalue_encoding.svg)
+![Spectral decomposition](docs/figures/spectral_decomposition.svg)
 ![Statevector distribution](docs/figures/statevector_distribution.svg)
 
 ## Mathematical Thread
 
 The implementation follows the canonical HHL workflow:
 
-1. Encode `b` as a quantum state `|b⟩`.
-2. Apply quantum phase estimation to encode eigenvalues of `A` into a clock register through `U = exp(iAt)`.
-3. Perform a controlled `R_y` rotation whose ancilla amplitude scales like `C / λ_j`.
+1. Encode `b` as the state `|b⟩`.
+2. Use quantum phase estimation on `U = exp(iAt)` to encode eigenvalue information in the clock register.
+3. Apply a basis-controlled `R_y` rotation so that the ancilla amplitude scales as `C / λ_j`.
 4. Uncompute phase estimation.
 5. Postselect on the inversion ancilla being `|1⟩`.
-6. Read off a state proportional to `A^{-1}|b⟩`.
+6. Extract the system register amplitudes from the postselected branch.
 
-Because the postselected amplitudes scale as `β_j / λ_j` in the eigenbasis, the final one-qubit system register is proportional to the classical solution vector.
+The helper `extract_solution_vector(...)` makes the postselection explicit: it isolates only the amplitudes with the ancilla in the accepting state and the phase register returned to `|00⟩`.
 
-In the final statevector, the useful branch is the component where the inversion ancilla is measured in `|1⟩` and the phase register has been uncomputed back to `|00⟩`. The helper `extract_solution_vector(...)` isolates exactly those amplitudes, making the postselection step explicit rather than implicit.
+## Core Numerical Results
 
-## Results
-
-For the fixed example in this repository, the classical solution is
+For this instance,
 
 \[
-x = A^{-1}b =
+x = A^{-1} b =
 \begin{bmatrix}
 9/8 \\
 3/8
+\end{bmatrix},
+\qquad
+\frac{x}{\|x\|} =
+\begin{bmatrix}
+0.948683 \\
+0.316228
 \end{bmatrix}.
 \]
 
-The simulated HHL output is compared against the normalized classical solution, along with the postselection success probability and the full statevector probability distribution.
+The simulated postselected HHL state is aligned with the same direction:
 
-For this example, the raw postselected amplitudes are proportional to
+\[
+|x_{\mathrm{HHL}}\rangle =
+\begin{bmatrix}
+0.948683 \\
+0.316228
+\end{bmatrix}.
+\]
+
+### Results Table
+
+| Quantity | Value |
+| --- | ---: |
+| Classical solution \(x\) | \([1.125,\;0.375]\) |
+| Raw postselected amplitudes | \([0.75,\;0.25]\) |
+| Normalized classical state | \([0.948683,\;0.316228]\) |
+| Normalized HHL state | \([0.948683,\;0.316228]\) |
+| Postselection success probability | `0.625000` |
+| State fidelity with classical normalized state | `1.000000` |
+| Relative \(L^2\) error | `8.29e-16` |
+
+The raw postselected amplitudes are proportional to the classical vector:
 
 \[
 \begin{bmatrix}
@@ -145,47 +179,99 @@ For this example, the raw postselected amplitudes are proportional to
 \begin{bmatrix}
 9/8 \\
 3/8
-\end{bmatrix},
+\end{bmatrix}.
 \]
 
-so normalizing the postselected branch reproduces the same direction as the classical solution.
+That proportionality is the central numerical signature of a successful HHL recovery.
 
-## Figure Previews
+## Numerical Analysis
 
-Generated assets are written to `docs/figures/` and committed with the repository:
+This repository now includes a small analysis layer in `src/hhl_lab/analysis.py`:
 
-- `solution_comparison.svg`
-- `statevector_distribution.svg`
-- `eigenvalue_encoding.svg`
-- `success_probability.svg`
+- spectral decomposition of the problem Hamiltonian
+- decomposition coefficients of `|b⟩` in the eigenbasis
+- state fidelity and relative error metrics
+- an eigenphase discretization sweep across register sizes
+
+For the canonical problem, the precision study is especially instructive:
+
+| Phase bits | Encoded eigenvalue states | Fidelity | Relative error | Interpretation |
+| --- | --- | ---: | ---: | --- |
+| 1 | `0`, `1` | undefined | undefined | the smaller eigenphase aliases to zero, so inversion fails |
+| 2 | `01`, `10` | `1.000000` | `1.24e-16` | exact representation |
+| 3+ | exact binary refinement | `1.000000` | `1.24e-16` | no further improvement needed |
+
+This is a nice pedagogical feature of the chosen example: two phase qubits are already sufficient because the eigenphases were engineered to land exactly on the binary grid.
+
+![Precision sweep](docs/figures/precision_sweep.svg)
+![Eigenvalue encoding](docs/figures/eigenvalue_encoding.svg)
+
+## Theory Note
+
+The file [docs/theory.tex](docs/theory.tex) is written as a compact scientific note rather than an appendix. It explains:
+
+- spectral decomposition of the system matrix
+- construction of `U = exp(iAt)`
+- phase encoding on a finite clock register
+- controlled reciprocal rotation
+- postselection and solution recovery
+- interpretation of the resulting amplitudes
+
+When `pdflatex` is available, compile it with:
+
+```bash
+python3 scripts/compile_latex.py
+```
+
+## Notebook Walkthrough
+
+The notebook [notebooks/01_hhl_algorithm_walkthrough.ipynb](notebooks/01_hhl_algorithm_walkthrough.ipynb) is now a genuine guided walkthrough rather than a thin smoke test. It covers:
+
+- the matrix and its eigenstructure
+- why the chosen evolution time is special
+- the circuit construction
+- the recovered postselected amplitudes
+- the interpretation of the solution direction
+- the precision study and generated figures
+
+## Figure Gallery
+
+Generated and committed figure assets include:
+
 - `circuit_hhl.svg`
 - `inversion_oracle.svg`
-
-## Theory Notes
-
-The file [docs/theory.tex](/Users/karimelhoudaigui/Desktop/QUANTUM_ALGORITHM/docs/theory.tex) provides a compact derivation of the algorithm and is designed to compile into `docs/theory.pdf` when `pdflatex` is available.
+- `solution_comparison.svg`
+- `statevector_distribution.svg`
+- `success_probability.svg`
+- `eigenvalue_encoding.svg`
+- `spectral_decomposition.svg`
+- `precision_sweep.svg`
 
 ## Tests
 
+Run the test suite with:
+
 ```bash
-pytest
+python3 -m pytest
 ```
 
-The test suite checks:
-- bitstring and normalization helpers
-- matrix construction and unitarity of `exp(iAt)`
-- inversion oracle rotation amplitudes
-- correct eigenvalue phase encoding
+The tests cover:
+
+- bitstring conversion and normalization helpers
+- unitarity of `exp(iAt)`
+- correctness of inversion-rotation amplitudes
+- phase-estimation encodings for the canonical example
 - proportionality of the recovered HHL state to `[9/8, 3/8]`
+- fidelity of the postselected HHL state with the normalized classical solution
 
 ## Limitations
 
-This is an educational small-scale implementation, not a scalable sparse-Hamiltonian simulation. The code intentionally focuses on explicit statevector inspection and interpretability rather than asymptotic performance.
+This is an educational, small-scale implementation. It is not a scalable sparse-Hamiltonian simulation, nor a complexity-theoretic benchmark of HHL in the fault-tolerant regime. The project intentionally prioritizes interpretability over asymptotic performance.
 
 ## Future Work
 
 - Generalize to larger Hermitian systems
 - Add Trotterized Hamiltonian simulation
-- Increase phase precision beyond two clock qubits
-- Study noise-aware simulation
-- Run the circuit on IBM Quantum backends
+- Support higher-precision QPE at the circuit level
+- Add noisy simulation and error-mitigation experiments
+- Execute the construction on IBM Quantum backends

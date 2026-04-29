@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from qiskit.quantum_info import Statevector
 
+from .analysis import relative_solution_error, state_fidelity
 from .hhl import HHLArtifacts, HHLConfiguration, build_hhl_circuit, extract_solution_vector
 from .matrices import (
     HHLProblem,
@@ -27,6 +28,8 @@ class SimulationResult:
     classical_solution: np.ndarray
     normalized_classical_solution: np.ndarray
     success_probability: float
+    fidelity_with_classical: float
+    relative_error: float
 
 
 def run_hhl_statevector(
@@ -52,6 +55,9 @@ def run_hhl_statevector(
     )
     success_probability = float(np.sum(np.abs(raw_solution) ** 2))
     normalized_hhl = raw_solution / np.sqrt(success_probability)
+    normalized_classical = normalized_classical_solution(problem)
+    fidelity = state_fidelity(normalized_hhl, normalized_classical)
+    relative_error = relative_solution_error(normalized_classical, normalized_hhl)
 
     return SimulationResult(
         artifacts=artifacts,
@@ -59,6 +65,8 @@ def run_hhl_statevector(
         raw_solution_amplitudes=raw_solution,
         normalized_hhl_solution=normalized_hhl,
         classical_solution=classical_solution(problem),
-        normalized_classical_solution=normalized_classical_solution(problem),
+        normalized_classical_solution=normalized_classical,
         success_probability=success_probability,
+        fidelity_with_classical=fidelity,
+        relative_error=relative_error,
     )
