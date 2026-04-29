@@ -84,6 +84,12 @@ This script:
 - performs a precision sweep over discretized eigenphases
 - regenerates all figures under `docs/figures/`
 
+Main notebook:
+
+`notebooks/QComp-TP-2-TP-HHL.ipynb`
+
+This is the central notebook of the project: a solved and cleaned adaptation of the original QComp HHL session, rewritten to align with the package, figures, and numerical analysis in the repository.
+
 ## Repository Structure
 
 ```text
@@ -102,6 +108,7 @@ This script:
 │   ├── qpe.py
 │   ├── simulation.py
 │   └── visualization.py
+├── notebooks/QComp-TP-2-TP-HHL.ipynb
 ├── notebooks/01_hhl_algorithm_walkthrough.ipynb
 ├── scripts/
 ├── docs/
@@ -225,7 +232,16 @@ python3 scripts/compile_latex.py
 
 ## Notebook Walkthrough
 
-The notebook [notebooks/01_hhl_algorithm_walkthrough.ipynb](notebooks/01_hhl_algorithm_walkthrough.ipynb) is now a genuine guided walkthrough rather than a thin smoke test. It covers:
+The main notebook is [notebooks/QComp-TP-2-TP-HHL.ipynb](notebooks/QComp-TP-2-TP-HHL.ipynb). It is the central narrative artifact of the repository and covers:
+
+- statevector conventions and basis ordering
+- the fixed HHL case study and exact eigenphase encoding
+- the inversion oracle logic
+- full HHL recovery and postselection
+- parameter and precision analysis
+- the signed-eigenvalue extension discussed in the original course material
+
+A shorter companion notebook, [notebooks/01_hhl_algorithm_walkthrough.ipynb](notebooks/01_hhl_algorithm_walkthrough.ipynb), remains available as a compact package-first walkthrough. It covers:
 
 - the matrix and its eigenstructure
 - why the chosen evolution time is special
