@@ -1,0 +1,805 @@
+	
+QComp - Coding Session #2: Implementing the HHL algorithm.
+
+SOLUTIONS PARTS 1 2 3
+
+This script contains a working implementation of HHL.
+
+First, make sure libraries are installed (you can comment those)
+
+# ! python -m pip install matplotlib
+# ! python -m pip install qiskit qiskit-aer
+Now, some libraries to load (nothing to modify here)
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import linalg
+from math import pi, gcd
+from qiskit import *
+from qiskit.circuit import *
+from qiskit.circuit.library import *
+from qiskit.quantum_info.operators import Operator
+from qiskit_aer import AerSimulator, StatevectorSimulator
+from scipy import optimize
+%matplotlib inline
+%config InlineBackend.figure_formats = ['svg']
+Small library for pretty-printing (nothing to do)
+
+def nat2bl(pad,n):
+    if n == 0: r = [0 for i in range(pad)]
+    elif n % 2 == 1: r = nat2bl(pad-1,(n-1)//2); r.append(1)
+    else: r = nat2bl(pad-1,n//2); r.append(0)
+    return r
+
+def bl2nat(s):
+    if len(s) == 0: return 0
+    else: a = s.pop(); return (a + 2*bl2nat(s))
+
+def bl2bs(l):
+    if len(l) == 0: return ""
+    else: a = l.pop(); return (bl2bs(l) + str(a))
+
+def nat2bs(pad,i): return bl2bs(nat2bl(pad,i))
+
+def bs2bl(s):
+    l = []
+    for i in range(len(s)): l.append(int(s[i]))
+    return l
+
+def bs2nat(s): return bl2nat(bs2bl(s))
+
+
+def processOneState(st): # Length = power of 2
+        s = list(st)
+        if len(s) == 2: return {'0' : s[0], '1' : s[1]}
+        else:
+            a0 = processOneState(s[:len(s)//2])
+            a1 = processOneState(s[len(s)//2:])
+            r = {}
+            for k in a0: r['0' + k] = a0[k]
+            for k in a1: r['1' + k] = a1[k]
+            return r
+
+def printOneState(d, keys=None): # get a dict as per processStates output
+    isThereMore = True
+    if keys == None:
+        keys = d.keys()
+        isThereMore = False
+    for k in sorted(keys):
+        if k not in d:
+            print(f"Error: {k} not valid. Maybe the size of the bitstring is invalid?")
+            isThereMore = False
+            break
+        im = d[k].imag
+        re = d[k].real
+        if abs(im) >= 0.001 or abs(re) >= 0.001:
+            print("% .5f + % .5fj |%s>" % (re,im,k))
+    if isThereMore: print(" ... (there might be more hidden terms)")
+
+def printFinalRes(result, keys=None):
+    printOneState(processOneState(list(np.asarray(result))), keys)
+
+def runStateVector(qc, keys=None):
+    simulator = StatevectorSimulator(statevector_parallel_threshold=6)
+    job = simulator.run(qc.decompose(reps=6), memory=True)
+    job_result = job.result()
+    result = job_result.results[0].to_dict()['data']['statevector']
+    printFinalRes(result, keys)
+
+def runStateVectorSeveralTimes(qc, howmany):
+    qc.save_statevector(label = 'collect', pershot = True)
+    simulator = StatevectorSimulator()
+    job = simulator.run(qc.decompose(reps=6), memory=True, shots=howmany)
+    result = job.result()
+    memory = result.data(0)['memory']
+    collect = result.data(0)['collect']
+    r = {}
+    for i in range(len(collect)):
+        r[str(collect[i])] = (0, collect[i])
+    for i in range(len(collect)):
+        n, v = r[str(collect[i])]
+        r[str(collect[i])] = (n+1, v)
+    for k in r:
+        i, v = r[k]
+        print(f"With {i} occurences:")
+        printFinalRes(v)
+
+def plotDistrib(d):
+    sorted_items = sorted(d.items())
+    keys = [k for k, _ in sorted_items]
+    values = [v for _, v in sorted_items]
+    plt.figure()
+    plt.bar(keys, values)
+    plt.xticks(rotation=90)
+    plt.show()
+
+def getSample(qc,howmany):
+    simulator = AerSimulator()
+    job = simulator.run(qc.decompose(reps=6), shots=howmany)
+    res = dict(job.result().get_counts(qc))
+    return res
+
+def plotSample(qc,howmany):
+    d = getSample(qc,howmany)
+    ld = len(list(d.keys())[0])
+    for i in range(2 ** ld):
+        s = nat2bs(ld,i)
+        if s not in d: d[s] = 0
+    plotDistrib(d)
+0 - Some Background
+
+0.1 - Computing (and Showing) State Vectors
+
+Let us use QisKit to compute a state vector, directly, with the backend StatevectorSimulator.
+
+q1 = QuantumRegister(3, name="q1")
+q2 = QuantumRegister(1, name="q2")
+qc = QuantumCircuit(q1,q2)
+
+qc.x(q1[0])
+qc.h(q1[1])
+qc.h(q2[0])
+
+qc.cx(q2[0],q1[2])
+
+# Show circuit, just to check
+qc.draw()
+      ┌───┐     
+q1_0: ┤ X ├─────
+      ├───┤     
+q1_1: ┤ H ├─────
+      └───┘┌───┐
+q1_2: ─────┤ X ├
+      ┌───┐└─┬─┘
+  q2: ┤ H ├──■──
+      └───┘     
+We can now "run" the circuit and see what is the state vector at the end. As we saw in the previous lab session, I wrote a small wrapper function to "nicely" print out the result. The precision is caped at 10
+−
+5
+ for readability.
+
+runStateVector(qc)
+ 0.50000 +  0.00000j |0001>
+ 0.50000 +  0.00000j |0011>
+ 0.50000 +  0.00000j |1101>
+ 0.50000 +  0.00000j |1111>
+Note how q2 (that was put at the end in QuantumRegister) appears at the beginning in the ket basis vectors. Compared to the circuit drawing, one must "turn the head to the left". I tried to use the same conventions as the results of measurements.
+
+It is possible to only show some of the basis vectors (when the sum is large and we only care about a handful of them).
+
+runStateVector(qc, keys=["0011", "1111"])
+ 0.50000 +  0.00000j |0011>
+ 0.50000 +  0.00000j |1111>
+ ... (there might be more hidden terms)
+0.2 - The HHL Algorithm
+
+For the presentation of the algorithm, see Section 3.6 of the lecture notes. In this section, we summarize the notations. The inputs to the algorithm is a hermitian matrix 
+A
+ and a vector 
+→
+b
+, and the problem is to solve the system
+
+A
+⋅
+→
+x
+=
+→
+b
+
+The idea consists in coding the vectors 
+→
+b
+ and 
+→
+x
+ in the state of registers: if 
+→
+b
+=
+(
+b
+0
+,
+b
+1
+,
+b
+2
+,
+b
+3
+)
+, we store the vector in 
+|
+b
+⟩
+=
+b
+0
+⋅
+|
+00
+⟩
++
+b
+1
+⋅
+|
+01
+⟩
++
+b
+2
+⋅
+|
+10
+⟩
++
+b
+3
+⋅
+|
+11
+⟩
+, modulo some renormalization.
+
+Of course, there are some constraints. But in summary, if
+
+N
+ is the size of the system
+s
+ is the number of non-zero elements on each line of 
+A
+κ
+ is the matrix condition number (the ratio between the largest and the smallest eigenvalue)
+ϵ
+ is the allowed error
+The the complexities are
+
+O
+(
+N
+s
+κ
+log
+(
+1
+/
+ϵ
+)
+)
+ for the classical algorithm
+
+O
+(
+log
+(
+N
+)
+s
+2
+κ
+2
+/
+ϵ
+)
+ for HHL
+
+Meaning that, in theory, we get an speedup exponential on the size of the system.
+
+1 - Case Study for this Lab Session
+
+We are going to use the case study described in Section 6.3.13 of the lecture notes. The system is
+
+x
+1
+−
+x
+2
+3
+=
+1
+−
+x
+1
+3
++
+x
+2
+=
+0
+  
+(1)
+(2)
+ 
+
+1.1 - Memory Encoding
+
+A single qubit is enough to store 
+→
+b
+ and 
+→
+x
+:
+
+→
+b
+≡
+1
+⋅
+|
+0
+⟩
++
+0
+⋅
+|
+1
+⟩
+→
+x
+≡
+(
+D
+x
+1
+)
+⋅
+|
+0
+⟩
++
+(
+D
+x
+2
+)
+⋅
+|
+1
+⟩
+  
+(3)
+(4)
+ 
+
+where 
+D
+ is a renormalization factor. Indeed, if you remember the lecture notes, the solution is
+
+(
+9
+/
+8
+3
+/
+8
+)
+
+which is not of norm 
+1
+.
+
+1.2 - Coding the algorithm
+
+The algorithm relies on several quantum registers:
+
+qb: to store 
+→
+b
+ and to read 
+→
+x
+. Here, of size 
+1
+.
+qe: ancilla to store the eigenvalues. For the given example, 
+2
+ qubits are enough.
+qi: a single qubit, to characterize the "good" subspace (where we can read the result).
+We need several subroutines for the algorithm:
+
+Initialization of the input vector 
+→
+b
+: In our case it is trivial.
+
+QPE : this has been done in Lab Session #1.
+
+The unitary to use for QPE: built from 
+A
+, it is 
+U
+=
+e
+i
+A
+t
+, for a "correct" 
+t
+, depending on 
+κ
+: it should be small enough so that the eigenvalues of 
+t
+A
+ do not "overflow", yet large enough to be readable.
+
+A subroutine implementing the inversion oracle.
+
+The major difficulty lies in the last two points. In this lab session, we shall use a quick-n-dirty road to get a working example (albeit not scalable).
+
+1.3 - The matrix 
+A
+ and the operator 
+U
+
+For our algorithm, we shall need the exponential 
+U
+=
+e
+i
+A
+t
+. In general, when 
+A
+ is very large, computing 
+U
+ is a costly operation: in the context of quantum computation, a strategy consists in using e.g. Trotterization, subject of the next lecture.
+
+For the purpose of our small 
+2
+×
+2
+ case-study, we shall simply compute the matrix 
+U
+ using the function expm of the library linalg and the built-in generic circuit synthesis implemented in QisKit.
+
+# The matrix A 
+
+A = np.array([[1,-1/3],[-1/3,1]])
+A
+array([[ 1.        , -0.33333333],
+       [-0.33333333,  1.        ]])
+# The coefficient giving exact results
+
+t = 2*pi*3/8
+
+# The exponential of $A$
+
+EA = linalg.expm((1j)*t*A)
+EA
+array([[-0.5+0.5j,  0.5+0.5j],
+       [ 0.5+0.5j, -0.5+0.5j]])
+# The corresponding unitary gate, using QisKit magic
+
+U = UnitaryGate(Operator(EA))
+U
+Instruction(name='unitary', num_qubits=1, num_clbits=0, params=[array([[-0.5+0.5j,  0.5+0.5j],
+       [ 0.5+0.5j, -0.5+0.5j]])])
+1.4 - The inversion subroutine
+
+Assume for simplicity that the eigenvalues are non-negative. We want to invert a value 
+λ
+>
+0
+ coded on 2 bits, for instance as follows:
+
+λ
+=
+e
+0
+2
++
+e
+1
+4
+
+(with 
+e
+0
+ and 
+e
+1
+ Boolean values).
+
+Note that 
+1
+3
+≤
+1
+4
+λ
+≤
+1
+
+We now want an operator that produces
+
+|
+e
+1
+e
+0
+⟩
+⊗
+|
+0
+⟩
+↦
+|
+e
+1
+e
+0
+⟩
+⊗
+(
+√
+1
+−
+1
+16
+λ
+2
+|
+0
+⟩
++
+1
+4
+λ
+|
+1
+⟩
+)
+
+Here, the value 
+1
+4
+ is the coefficient 
+C
+ in Section 6.3.13 of the lecture notes. It is chosen so that the coefficients of shape 
+2
+π
+⋅
+C
+λ
+t
+ obtained from the eigenvalues of 
+t
+A
+ are indeed within 
+−
+1
+ and 
+1
+.
+
+TODO
+
+Realize this operation with multi-controlled 
+R
+y
+(
+θ
+)
+ gates. The gate is
+
+R
+y
+(
+θ
+)
+=
+(
+cos
+(
+θ
+/
+2
+)
+−
+sin
+(
+θ
+/
+2
+)
+sin
+(
+θ
+/
+2
+)
+cos
+(
+θ
+/
+2
+)
+)
+
+To build the circuit:
+
+Arcsine is np.arcsin in Python
+R
+y
+ gates are RYGate(angle) in QisKit
+A gate gate can be controlled with gate.control(num_ctrl_qubits=3, ctrl_state='101') if you want 3 controls: 1 positive, 1 negative, 1 positive
+A gate can be inserted in a circuit withmycircuit.append(mygate, list-of-wires).
+# For the value to invert
+n = 2
+r = QuantumRegister(n, name="r")
+
+# To store the invert
+inv = QuantumRegister(1, name="inv")
+
+qcinv = QuantumCircuit(r,inv)
+
+C = 1 / 2 ** n
+
+for i in range(1,(2 ** n)):
+    state = nat2bs(n, i)
+    val = bs2nat(state) / 2**n
+    gate = RYGate(2*np.arcsin(C/val))
+    gate = gate.control(num_ctrl_qubits=n, ctrl_state=state)
+    qcinv.append(gate, list(r) + [inv[0]])
+
+qcinv.draw()
+                                        
+r_0: ────■─────────o────────────■───────
+         │         │            │       
+r_1: ────o─────────■────────────■───────
+     ┌───┴───┐┌────┴────┐┌──────┴──────┐
+inv: ┤ Ry(π) ├┤ Ry(π/3) ├┤ Ry(0.67967) ├
+     └───────┘└─────────┘└─────────────┘
+We will now store this circuit inside a (large) unitary gate invCirc acting on 3 wires.
+
+invCirc = qcinv.to_gate(label="inv")
+To understand how to use this gate (and make sure it works), here is a small code snippet. Change the value v to check that you get the correct value.
+
+The gate invCirc is added to a circuit with qc.append(invCirc, list-of-wires)
+Where do we read the value 
+1
+/
+v
+ ?
+At the level of kets, where are the registers q and r?
+# The value to invert : test 1, 2 and 3 and make sure to understand what's going on
+v = 1
+
+# For the value to invert
+r = QuantumRegister(n, name="r")
+
+# To store the value
+inv = QuantumRegister(1, name="inv")
+
+qctest = QuantumCircuit(r,inv)
+bi = list(reversed(nat2bl(n,v)))  
+for i in range(len(bi)):
+    if bi[i] == 1:
+        qctest.x(r[i])
+
+qctest.append(invCirc, list(r) + [inv[0]])
+
+#Execute and get result
+runStateVector(qctest)
+ 1.00000 + -0.00000j |101>
+3 - Summing-up: Complete HHL Algorithm
+
+Below you will find a code with holes to be filled in, realizing HHL with 2 bits of precisions, using the pieces above and QPE that was done in Lab Session #2.
+
+3.1 - TODO
+
+Fill in the holes in order to get a circuit with the right shape and that computes the correct answer.
+
+# For |b>
+nb = 1
+qb = QuantumRegister(nb, name="b")
+
+# For the eigenvalue : ne bits of précision
+ne = 2
+qe = QuantumRegister(ne, name="eig")
+
+# For the angle : only one qubit
+qi = QuantumRegister(1, name="inv")
+
+# Creating the circuit
+qc = QuantumCircuit(qi,qe,qb)
+
+## TODO : QPE on qb and qe
+
+qc.h(qe)
+
+for i in reversed(range(ne)):
+    qc.append(U.power(2 ** (i)).control(),[qe[i]] + list(qb))
+
+qc.append(QFTGate(ne).inverse(),qe)
+
+
+## TODO invCirc on qe and qi
+
+qc.append(invCirc, list(qe) + [qi[0]])
+
+
+## TODO : QPE, inverted
+
+qc.append(QFTGate(ne),qe)
+
+for i in range(ne):
+    qc.append(U.power(-2 ** (i)).control(),[qe[i]] + list(qb))
+
+qc.h(qe)
+
+# Beware ! We do not measure because we want to see the final state vector.
+# Let us draw the circuit and check that it looks correct
+qc.draw()
+                                                 ┌──────┐                      »
+  inv: ──────────────────────────────────────────┤2     ├──────────────────────»
+       ┌───┐                          ┌─────────┐│      │┌──────┐              »
+eig_0: ┤ H ├───────────────────■──────┤0        ├┤0 inv ├┤0     ├──────■───────»
+       ├───┤                   │      │  qft_dg ││      ││  Qft │      │       »
+eig_1: ┤ H ├──────■────────────┼──────┤1        ├┤1     ├┤1     ├──────┼───────»
+       └───┘┌─────┴─────┐┌─────┴─────┐└─────────┘└──────┘└──────┘┌─────┴──────┐»
+    b: ─────┤ unitary^2 ├┤ unitary^1 ├───────────────────────────┤ unitary^-1 ├»
+            └───────────┘└───────────┘                           └────────────┘»
+«                          
+«  inv: ───────────────────
+«           ┌───┐          
+«eig_0: ────┤ H ├──────────
+«           └───┘     ┌───┐
+«eig_1: ──────■───────┤ H ├
+«       ┌─────┴──────┐└───┘
+«    b: ┤ unitary^-2 ├─────
+«       └────────────┘     
+Now, let us test the circuit.
+
+# On lance un simulateur
+runStateVector(qc)
+ 0.43301 +  0.00000j |0000>
+ 0.75000 +  0.00000j |0001>
+-0.43301 + -0.00000j |1000>
+ 0.25000 +  0.00000j |1001>
+Remember (or look at Section 6.3.10 Point 4 in the lecture notes) that the final state should be
+
+|
+0
+⟩
+q
+i
+⊗
+[
+uninteresting
+]
++
+2
+π
+C
+t
+|
+1
+⟩
+q
+i
+⊗
+|
+x
+⟩
+
+SOLUTION we can indeed read the answer: the last bit is the register qi, and 
+2
+π
+C
+t
+ is 
+2
+3
+. The value 0.250000 we read in the result is indeed 
+3
+8
+⋅
+2
+3
+, and similarly for 0.750000.

@@ -1,0 +1,168 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{HHL Algorithm in Qiskit:\\From Quantum Linear Systems to Executable Circuits}
+\author{Compact educational implementation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+This repository studies the Hermitian linear system
+\[
+A x = b,
+\qquad
+A =
+\begin{bmatrix}
+1 & -1/3 \\
+-1/3 & 1
+\end{bmatrix},
+\qquad
+b =
+\begin{bmatrix}
+1 \\
+0
+\end{bmatrix}.
+\]
+The goal is to show, in a fully executable and inspectable way, how the Harrow-Hassidim-Lloyd algorithm produces a quantum state proportional to the normalized classical solution.
+
+\section{State Encoding}
+
+The right-hand side is encoded as a quantum state
+\[
+|b\rangle = \frac{b_0|0\rangle + b_1|1\rangle}{\|b\|}.
+\]
+For the fixed example used here, $b = (1,0)^T$, so $|b\rangle = |0\rangle$.
+
+\section{Spectral Decomposition}
+
+The matrix $A$ is Hermitian, with eigenpairs
+\[
+\lambda_1 = \frac{2}{3},
+\qquad
+|u_1\rangle = \frac{|0\rangle + |1\rangle}{\sqrt{2}},
+\]
+\[
+\lambda_2 = \frac{4}{3},
+\qquad
+|u_2\rangle = \frac{|0\rangle - |1\rangle}{\sqrt{2}}.
+\]
+The input state decomposes as
+\[
+|b\rangle = \sum_j \beta_j |u_j\rangle
+= \frac{1}{\sqrt{2}}|u_1\rangle + \frac{1}{\sqrt{2}}|u_2\rangle.
+\]
+
+\section{Hamiltonian Simulation and QPE}
+
+HHL uses the unitary
+\[
+U = e^{iAt},
+\qquad
+t = \frac{3\pi}{4}.
+\]
+This time is chosen so that
+\[
+\phi_j = \frac{\lambda_j t}{2\pi}
+\]
+is exactly representable on two phase qubits:
+\[
+\phi_1 = \frac{1}{4},
+\qquad
+\phi_2 = \frac{1}{2}.
+\]
+Quantum phase estimation maps
+\[
+\sum_j \beta_j |u_j\rangle |00\rangle
+\longmapsto
+\sum_j \beta_j |u_j\rangle |\tilde{\lambda}_j\rangle,
+\]
+where the phase register stores the discretized eigenvalue information.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/circuit_hhl.png}
+    \caption{Executable HHL circuit generated from the package.}
+\end{figure}
+
+\section{Controlled Inversion}
+
+An ancilla qubit is rotated conditionally on the encoded eigenvalue. For a scale constant $C \le \min_j \lambda_j$, the controlled rotation is chosen so that
+\[
+|0\rangle_{\mathrm{anc}}
+\mapsto
+\sqrt{1 - \left(\frac{C}{\lambda_j}\right)^2}|0\rangle
++
+\frac{C}{\lambda_j}|1\rangle.
+\]
+After this step, the amplitude of the ancilla state $|1\rangle$ carries the desired reciprocal factor.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/inversion_oracle.png}
+    \caption{Inversion oracle implemented with basis-controlled $R_y$ rotations.}
+\end{figure}
+
+\section{Uncomputation and Postselection}
+
+Applying the inverse of QPE removes the phase register,
+\[
+\sum_j \beta_j |u_j\rangle |\tilde{\lambda}_j\rangle
+\longmapsto
+\sum_j \beta_j |u_j\rangle |00\rangle,
+\]
+while preserving the ancilla amplitude factors. Postselecting on the ancilla state $|1\rangle$ yields
+\[
+\sum_j \beta_j \frac{C}{\lambda_j} |u_j\rangle
+\propto
+A^{-1}|b\rangle.
+\]
+This is the key mechanism behind the HHL solution recovery.
+
+\section{Classical Comparison}
+
+The classical solution is
+\[
+x = A^{-1}b =
+\begin{bmatrix}
+9/8 \\
+3/8
+\end{bmatrix}.
+\]
+The HHL output is a normalized quantum state, so comparison is performed after normalization. The postselected system amplitudes are proportional to the classical vector, and the proportionality constant is absorbed by state normalization.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/solution_comparison.png}
+    \caption{Normalized classical solution compared with the postselected HHL state.}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/eigenvalue_encoding.png}
+    \caption{Two-qubit encoding of the two eigenvalues used by the example.}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/statevector_distribution.png}
+    \caption{Probability distribution of the final four-qubit statevector.}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.55\textwidth]{figures/success_probability.png}
+    \caption{Success probability of measuring the inversion ancilla in the accepting state.}
+\end{figure}
+
+\section{Interpretation}
+
+This implementation is intentionally small and transparent. It is not a scalable sparse linear-systems solver, but it does expose each conceptual stage of HHL in a way that can be inspected directly in code, tests, circuit diagrams, and statevector amplitudes.
+
+\end{document}
